@@ -746,14 +746,27 @@
         } else if ( typeof(uiGridTreeBaseService.nativeAggregations()[aggregationType]) !== 'undefined' ){
           aggregationDef = uiGridTreeBaseService.nativeAggregations()[aggregationType];
         }
+        
+        if(aggregationDef.aggregationFnAsync) {
+            aggregationDef.aggregationFnAsync(grid, column, aggregationType).then(function(resp) {
+                column.treeAggregation = { type: aggregationType, label:  i18nService.get().aggregation[aggregationDef.label] || aggregationDef.label, data: resp };
+                column.treeAggregationFn = aggregationDef.aggregationFn;
+                column.treeAggregationFinalizerFn = aggregationDef.finalizerFn;
 
-        column.treeAggregation = { type: aggregationType, label:  i18nService.get().aggregation[aggregationDef.label] || aggregationDef.label };
-        column.treeAggregationFn = aggregationDef.aggregationFn;
-        column.treeAggregationFinalizerFn = aggregationDef.finalizerFn;
+                grid.api.grouping.raise.aggregationChanged(column);
 
-        grid.api.grouping.raise.aggregationChanged(column);
+                grid.queueGridRefresh();
+            });
+        } else {
+            column.treeAggregation = { type: aggregationType, label:  i18nService.get().aggregation[aggregationDef.label] || aggregationDef.label };
+            column.treeAggregationFn = aggregationDef.aggregationFn;
+            column.treeAggregationFinalizerFn = aggregationDef.finalizerFn;
 
-        grid.queueGridRefresh();
+            grid.api.grouping.raise.aggregationChanged(column);
+
+            grid.queueGridRefresh();
+        }
+
       },
 
 
@@ -767,502 +780,502 @@
        * @param {Grid} grid grid object
        * @param {object} config the config we want to set, same format as that returned by getGrouping
        */
-      setGrouping: function ( grid, config ){
-        if ( typeof(config) === 'undefined' ){
-          return;
-        }
-
-        // first remove any existing grouping
-        service.clearGrouping(grid);
-
-        if ( config.grouping && config.grouping.length && config.grouping.length > 0 ){
-          config.grouping.forEach( function( group ) {
-            var col = grid.getColumn(group.colName);
-
-            if ( col ) {
-              service.groupColumn( grid, col );
-            }
-          });
-        }
-
-        if ( config.aggregations && config.aggregations.length ){
-          config.aggregations.forEach( function( aggregation ) {
-            var col = grid.getColumn(aggregation.colName);
-
-            if ( col ) {
-              service.aggregateColumn( grid, col, aggregation.aggregation.type );
-            }
-          });
-        }
-
-        if ( config.rowExpandedStates ){
-          service.applyRowExpandedStates( grid.grouping.groupingHeaderCache, config.rowExpandedStates );
-        }
-      },
-
-
-      /**
-       * @ngdoc function
-       * @name clearGrouping
-       * @methodOf  ui.grid.grouping.service:uiGridGroupingService
-       * @description Clear any grouped columns and any aggregations.  Doesn't remove sorting,
-       * as we don't know whether that sorting was added by grouping or was there beforehand
-       *
-       * @param {Grid} grid grid object
-       */
-      clearGrouping: function( grid ) {
-        var currentGrouping = service.getGrouping(grid);
-
-        if ( currentGrouping.grouping.length > 0 ){
-          currentGrouping.grouping.forEach( function( group ) {
-            if (!group.col){
-              // should have a group.colName if there's no col
-              group.col = grid.getColumn(group.colName);
-            }
-            service.ungroupColumn(grid, group.col);
-          });
-        }
-
-        if ( currentGrouping.aggregations.length > 0 ){
-          currentGrouping.aggregations.forEach( function( aggregation ){
-            if (!aggregation.col){
-              // should have a group.colName if there's no col
-              aggregation.col = grid.getColumn(aggregation.colName);
-            }
-            service.aggregateColumn(grid, aggregation.col, null);
-          });
-        }
-      },
-
-
-      /**
-       * @ngdoc function
-       * @name tidyPriorities
-       * @methodOf  ui.grid.grouping.service:uiGridGroupingService
-       * @description Renumbers groupPriority and sortPriority such that
-       * groupPriority is contiguous, and sortPriority either matches
-       * groupPriority (for group columns), and otherwise is contiguous and
-       * higher than groupPriority.
-       *
-       * @param {Grid} grid grid object
-       */
-      tidyPriorities: function( grid ){
-        // if we're called from sortChanged, grid is in this, not passed as param, the param can be a column or undefined
-        if ( ( typeof(grid) === 'undefined' || typeof(grid.grid) !== 'undefined' ) && typeof(this.grid) !== 'undefined' ) {
-          grid = this.grid;
-        }
-
-        var groupArray = [];
-        var sortArray = [];
-
-        grid.columns.forEach( function(column, index){
-          if ( typeof(column.grouping) !== 'undefined' && typeof(column.grouping.groupPriority) !== 'undefined' && column.grouping.groupPriority >= 0){
-            groupArray.push(column);
-          } else if ( typeof(column.sort) !== 'undefined' && typeof(column.sort.priority) !== 'undefined' && column.sort.priority >= 0){
-            sortArray.push(column);
-          }
-        });
-
-        groupArray.sort(function(a, b){ return a.grouping.groupPriority - b.grouping.groupPriority; });
-        groupArray.forEach( function(column, index){
-          column.grouping.groupPriority = index;
-          column.suppressRemoveSort = true;
-          if ( typeof(column.sort) === 'undefined'){
-            column.sort = {};
-          }
-          column.sort.priority = index;
-        });
-
-        var i = groupArray.length;
-        sortArray.sort(function(a, b){ return a.sort.priority - b.sort.priority; });
-        sortArray.forEach( function(column, index){
-          column.sort.priority = i;
-          column.suppressRemoveSort = column.colDef.suppressRemoveSort;
-          i++;
-        });
-      },
-
-
-      /**
-       * @ngdoc function
-       * @name groupRows
-       * @methodOf  ui.grid.grouping.service:uiGridGroupingService
-       * @description The rowProcessor that creates the groupHeaders (i.e. does
-       * the actual grouping).
-       *
-       * Assumes it is always called after the sorting processor, guaranteed by the priority setting
-       *
-       * Processes all the rows in order, inserting a groupHeader row whenever there is a change
-       * in value of a grouped row, based on the sortAlgorithm used for the column.  The group header row
-       * is looked up in the groupHeaderCache, and used from there if there is one. The entity is reset
-       * to {} if one is found.
-       *
-       * As it processes it maintains a `processingState` array. This records, for each level of grouping we're
-       * working with, the following information:
-       * ```
-       *   {
-       *     fieldName: name,
-       *     col: col,
-       *     initialised: boolean,
-       *     currentValue: value,
-       *     currentRow: gridRow,
-       *   }
-       * ```
-       * We look for changes in the currentValue at any of the levels.  Where we find a change we:
-       *
-       * - create a new groupHeader row in the array
-       *
-       * @param {array} renderableRows the rows we want to process, usually the output from the previous rowProcessor
-       * @returns {array} the updated rows, including our new group rows
-       */
-      groupRows: function( renderableRows ) {
-        if (renderableRows.length === 0){
-          return renderableRows;
-        }
-
-        var grid = this;
-        grid.grouping.oldGroupingHeaderCache = grid.grouping.groupingHeaderCache || {};
-        grid.grouping.groupingHeaderCache = {};
-
-        var processingState = service.initialiseProcessingState( grid );
-
-        // processes each of the fields we are grouping by, checks if the value has changed and inserts a groupHeader
-        // Broken out as shouldn't create functions in a loop.
-        var updateProcessingState = function( groupFieldState, stateIndex ) {
-          var fieldValue = grid.getCellValue(row, groupFieldState.col);
-
-          // look for change of value - and insert a header
-          if ( !groupFieldState.initialised || rowSorter.getSortFn(grid, groupFieldState.col, renderableRows)(fieldValue, groupFieldState.currentValue) !== 0 ){
-            service.insertGroupHeader( grid, renderableRows, i, processingState, stateIndex );
-            i++;
-          }
-        };
-
-        // use a for loop because it's tolerant of the array length changing whilst we go - we can
-        // manipulate the iterator when we insert groupHeader rows
-        for (var i = 0; i < renderableRows.length; i++ ){
-          var row = renderableRows[i];
-
-          if ( row.visible ){
-            processingState.forEach( updateProcessingState );
-          }
-        }
-
-        delete grid.grouping.oldGroupingHeaderCache;
-        return renderableRows;
-      },
-
-
-      /**
-       * @ngdoc function
-       * @name initialiseProcessingState
-       * @methodOf  ui.grid.grouping.service:uiGridGroupingService
-       * @description Creates the processing state array that is used
-       * for groupRows.
-       *
-       * @param {Grid} grid grid object
-       * @returns {array} an array in the format described in the groupRows method,
-       * initialised with blank values
-       */
-      initialiseProcessingState: function( grid ){
-        var processingState = [];
-        var columnSettings = service.getGrouping( grid );
-
-        columnSettings.grouping.forEach( function( groupItem, index){
-          processingState.push({
-            fieldName: groupItem.field,
-            col: groupItem.col,
-            initialised: false,
-            currentValue: null,
-            currentRow: null
-          });
-        });
-
-        return processingState;
-      },
-
-
-      /**
-       * @ngdoc function
-       * @name getGrouping
-       * @methodOf  ui.grid.grouping.service:uiGridGroupingService
-       * @description Get the grouping settings from the columns.  As a side effect
-       * this always renumbers the grouping starting at 0
-       * @param {Grid} grid grid object
-       * @returns {array} an array of the group fields, in order of priority
-       */
-      getGrouping: function( grid ){
-        var groupArray = [];
-        var aggregateArray = [];
-
-        // get all the grouping
-        grid.columns.forEach( function(column, columnIndex){
-          if ( column.grouping ){
-            if ( typeof(column.grouping.groupPriority) !== 'undefined' && column.grouping.groupPriority >= 0){
-              groupArray.push({ field: column.field, col: column, groupPriority: column.grouping.groupPriority, grouping: column.grouping });
-            }
-          }
-          if ( column.treeAggregation && column.treeAggregation.type ){
-            aggregateArray.push({ field: column.field, col: column, aggregation: column.treeAggregation });
-          }
-        });
-
-        // sort grouping into priority order
-        groupArray.sort( function(a, b){
-          return a.groupPriority - b.groupPriority;
-        });
-
-        // renumber the priority in case it was somewhat messed up, then remove the grouping reference
-        groupArray.forEach( function( group, index) {
-          group.grouping.groupPriority = index;
-          group.groupPriority = index;
-          delete group.grouping;
-        });
-
-        return { grouping: groupArray, aggregations: aggregateArray };
-      },
-
-
-      /**
-       * @ngdoc function
-       * @name insertGroupHeader
-       * @methodOf  ui.grid.grouping.service:uiGridGroupingService
-       * @description Create a group header row, and link it to the various configuration
-       * items that we use.
-       *
-       * Look for the row in the oldGroupingHeaderCache, write the row into the new groupingHeaderCache.
-       *
-       * @param {Grid} grid grid object
-       * @param {array} renderableRows the rows that we are processing
-       * @param {number} rowIndex the row we were up to processing
-       * @param {array} processingState the current processing state
-       * @param {number} stateIndex the processing state item that we were on when we triggered a new group header -
-       * i.e. the column that we want to create a header for
-       */
-      insertGroupHeader: function( grid, renderableRows, rowIndex, processingState, stateIndex ) {
-        // set the value that caused the end of a group into the header row and the processing state
-        var fieldName = processingState[stateIndex].fieldName;
-        var col = processingState[stateIndex].col;
-
-        var newValue = grid.getCellValue(renderableRows[rowIndex], col);
-        var newDisplayValue = newValue;
-        if ( typeof(newValue) === 'undefined' || newValue === null ) {
-          newDisplayValue = grid.options.groupingNullLabel;
-        }
-
-        var getKeyAsValueForCacheMap = function(key) {
-          if (angular.isObject(key)) {
-              return JSON.stringify(key);
-          } else {
-              return key;
-          }
-        };
-
-        var cacheItem = grid.grouping.oldGroupingHeaderCache;
-        for ( var i = 0; i < stateIndex; i++ ){
-          if ( cacheItem && cacheItem[getKeyAsValueForCacheMap(processingState[i].currentValue)] ){
-            cacheItem = cacheItem[getKeyAsValueForCacheMap(processingState[i].currentValue)].children;
-          }
-        }
-
-        var headerRow;
-        if ( cacheItem && cacheItem[getKeyAsValueForCacheMap(newValue)]){
-          headerRow = cacheItem[getKeyAsValueForCacheMap(newValue)].row;
-          headerRow.entity = {};
-        } else {
-          headerRow = new GridRow( {}, null, grid );
-          gridClassFactory.rowTemplateAssigner.call(grid, headerRow);
-        }
-
-        headerRow.entity['$$' + processingState[stateIndex].col.uid] = { groupVal: newDisplayValue };
-        headerRow.treeLevel = stateIndex;
-        headerRow.groupHeader = true;
-        headerRow.internalRow = true;
-        headerRow.enableCellEdit = false;
-        headerRow.enableSelection = grid.options.enableGroupHeaderSelection;
-        processingState[stateIndex].initialised = true;
-        processingState[stateIndex].currentValue = newValue;
-        processingState[stateIndex].currentRow = headerRow;
-
-        // set all processing states below this one to not be initialised - change of this state
-        // means all those need to start again
-        service.finaliseProcessingState( processingState, stateIndex + 1);
-
-        // insert our new header row
-        renderableRows.splice(rowIndex, 0, headerRow);
-
-        // add our new header row to the cache
-        cacheItem = grid.grouping.groupingHeaderCache;
-        for ( i = 0; i < stateIndex; i++ ){
-          cacheItem = cacheItem[getKeyAsValueForCacheMap(processingState[i].currentValue)].children;
-        }
-        cacheItem[getKeyAsValueForCacheMap(newValue)] = { row: headerRow, children: {} };
-      },
-
-
-      /**
-       * @ngdoc function
-       * @name finaliseProcessingState
-       * @methodOf  ui.grid.grouping.service:uiGridGroupingService
-       * @description Set all processing states lower than the one that had a break in value to
-       * no longer be initialised.  Render the counts into the entity ready for display.
-       *
-       * @param {Grid} grid grid object
-       * @param {array} processingState the current processing state
-       * @param {number} stateIndex the processing state item that we were on when we triggered a new group header, all
-       * processing states after this need to be finalised
-       */
-      finaliseProcessingState: function( processingState, stateIndex ){
-        for ( var i = stateIndex; i < processingState.length; i++){
-          processingState[i].initialised = false;
-          processingState[i].currentRow = null;
-          processingState[i].currentValue = null;
-        }
-      },
-
-
-      /**
-       * @ngdoc function
-       * @name getRowExpandedStates
-       * @methodOf  ui.grid.grouping.service:uiGridGroupingService
-       * @description Extract the groupHeaderCache hash, pulling out only the states.
-       *
-       * The example below shows a grid that is grouped by gender then age
-       *
-       * <pre>
-       *   {
-       *     male: {
-       *       state: 'expanded',
-       *       children: {
-       *         22: { state: 'expanded' },
-       *         30: { state: 'collapsed' }
-       *       }
-       *     },
-       *     female: {
-       *       state: 'expanded',
-       *       children: {
-       *         28: { state: 'expanded' },
-       *         55: { state: 'collapsed' }
-       *       }
-       *     }
-       *   }
-       * </pre>
-       *
-       * @param {Grid} grid grid object
-       * @returns {hash} the expanded states as a hash
-       */
-      getRowExpandedStates: function(treeChildren){
-        if ( typeof(treeChildren) === 'undefined' ){
-          return {};
-        }
-
-        var newChildren = {};
-
-        angular.forEach( treeChildren, function( value, key ){
-          newChildren[key] = { state: value.row.treeNode.state };
-          if ( value.children ){
-            newChildren[key].children = service.getRowExpandedStates( value.children );
-          } else {
-            newChildren[key].children = {};
-          }
-        });
-
-        return newChildren;
-      },
-
-
-      /**
-       * @ngdoc function
-       * @name applyRowExpandedStates
-       * @methodOf  ui.grid.grouping.service:uiGridGroupingService
-       * @description Take a hash in the format as created by getRowExpandedStates,
-       * and apply it to the grid.grouping.groupHeaderCache.
-       *
-       * Takes a treeSubset, and applies to a treeSubset - so can be called
-       * recursively.
-       *
-       * @param {object} currentNode can be grid.grouping.groupHeaderCache, or any of
-       * the children of that hash
-       * @returns {hash} expandedStates can be the full expanded states, or children
-       * of that expanded states (which hopefully matches the subset of the groupHeaderCache)
-       */
-      applyRowExpandedStates: function( currentNode, expandedStates ){
-        if ( typeof(expandedStates) === 'undefined' ){
-          return;
-        }
-
-        angular.forEach(expandedStates, function( value, key ) {
-          if ( currentNode[key] ){
-            currentNode[key].row.treeNode.state = value.state;
-
-            if (value.children && currentNode[key].children){
-              service.applyRowExpandedStates( currentNode[key].children, value.children );
-            }
-          }
-        });
-      }
-
-
-    };
-
-    return service;
-
-  }]);
-
-
-  /**
-   *  @ngdoc directive
-   *  @name ui.grid.grouping.directive:uiGridGrouping
-   *  @element div
-   *  @restrict A
-   *
-   *  @description Adds grouping features to grid
-   *
-   *  @example
-   <example module="app">
-   <file name="app.js">
-   var app = angular.module('app', ['ui.grid', 'ui.grid.grouping']);
-
-   app.controller('MainCtrl', ['$scope', function ($scope) {
-      $scope.data = [
-        { name: 'Bob', title: 'CEO' },
-            { name: 'Frank', title: 'Lowly Developer' }
-      ];
-
-      $scope.columnDefs = [
-        {name: 'name', enableCellEdit: true},
-        {name: 'title', enableCellEdit: true}
-      ];
-
-      $scope.gridOptions = { columnDefs: $scope.columnDefs, data: $scope.data };
-    }]);
-   </file>
-   <file name="index.html">
-   <div ng-controller="MainCtrl">
-   <div ui-grid="gridOptions" ui-grid-grouping></div>
-   </div>
-   </file>
-   </example>
-   */
-  module.directive('uiGridGrouping', ['uiGridGroupingConstants', 'uiGridGroupingService', '$templateCache',
-  function (uiGridGroupingConstants, uiGridGroupingService, $templateCache) {
-    return {
-      replace: true,
-      priority: 0,
-      require: '^uiGrid',
-      scope: false,
-      compile: function () {
-        return {
-          pre: function ($scope, $elm, $attrs, uiGridCtrl) {
-            if (uiGridCtrl.grid.options.enableGrouping !== false){
-              uiGridGroupingService.initializeGrid(uiGridCtrl.grid, $scope);
-            }
-          },
-          post: function ($scope, $elm, $attrs, uiGridCtrl) {
-          }
-        };
-      }
-    };
-  }]);
-
-})();
+                setGrouping: function ( grid, config ){
+                    if ( typeof(config) === 'undefined' ){
+                        return;
+                    }
+
+                    // first remove any existing grouping
+                    service.clearGrouping(grid);
+
+                    if ( config.grouping && config.grouping.length && config.grouping.length > 0 ){
+                        config.grouping.forEach( function( group ) {
+                            var col = grid.getColumn(group.colName);
+
+                            if ( col ) {
+                                service.groupColumn( grid, col );
+                            }
+                        });
+                    }
+
+                    if ( config.aggregations && config.aggregations.length ){
+                        config.aggregations.forEach( function( aggregation ) {
+                            var col = grid.getColumn(aggregation.colName);
+
+                            if ( col ) {
+                                service.aggregateColumn( grid, col, aggregation.aggregation.type );
+                            }
+                        });
+                    }
+
+                    if ( config.rowExpandedStates ){
+                        service.applyRowExpandedStates( grid.grouping.groupingHeaderCache, config.rowExpandedStates );
+                    }
+                },
+
+
+                /**
+                 * @ngdoc function
+                 * @name clearGrouping
+                 * @methodOf  ui.grid.grouping.service:uiGridGroupingService
+                 * @description Clear any grouped columns and any aggregations.  Doesn't remove sorting,
+                 * as we don't know whether that sorting was added by grouping or was there beforehand
+                 *
+                 * @param {Grid} grid grid object
+                 */
+                clearGrouping: function( grid ) {
+                    var currentGrouping = service.getGrouping(grid);
+
+                    if ( currentGrouping.grouping.length > 0 ){
+                        currentGrouping.grouping.forEach( function( group ) {
+                            if (!group.col){
+                                // should have a group.colName if there's no col
+                                group.col = grid.getColumn(group.colName);
+                            }
+                            service.ungroupColumn(grid, group.col);
+                        });
+                    }
+
+                    if ( currentGrouping.aggregations.length > 0 ){
+                        currentGrouping.aggregations.forEach( function( aggregation ){
+                            if (!aggregation.col){
+                                // should have a group.colName if there's no col
+                                aggregation.col = grid.getColumn(aggregation.colName);
+                            }
+                            service.aggregateColumn(grid, aggregation.col, null);
+                        });
+                    }
+                },
+
+
+                /**
+                 * @ngdoc function
+                 * @name tidyPriorities
+                 * @methodOf  ui.grid.grouping.service:uiGridGroupingService
+                 * @description Renumbers groupPriority and sortPriority such that
+                 * groupPriority is contiguous, and sortPriority either matches
+                 * groupPriority (for group columns), and otherwise is contiguous and
+                 * higher than groupPriority.
+                 *
+                 * @param {Grid} grid grid object
+                 */
+                tidyPriorities: function( grid ){
+                    // if we're called from sortChanged, grid is in this, not passed as param, the param can be a column or undefined
+                    if ( ( typeof(grid) === 'undefined' || typeof(grid.grid) !== 'undefined' ) && typeof(this.grid) !== 'undefined' ) {
+                        grid = this.grid;
+                    }
+
+                    var groupArray = [];
+                    var sortArray = [];
+
+                    grid.columns.forEach( function(column, index){
+                        if ( typeof(column.grouping) !== 'undefined' && typeof(column.grouping.groupPriority) !== 'undefined' && column.grouping.groupPriority >= 0){
+                            groupArray.push(column);
+                        } else if ( typeof(column.sort) !== 'undefined' && typeof(column.sort.priority) !== 'undefined' && column.sort.priority >= 0){
+                            sortArray.push(column);
+                        }
+                    });
+
+                    groupArray.sort(function(a, b){ return a.grouping.groupPriority - b.grouping.groupPriority; });
+                    groupArray.forEach( function(column, index){
+                        column.grouping.groupPriority = index;
+                        column.suppressRemoveSort = true;
+                        if ( typeof(column.sort) === 'undefined'){
+                            column.sort = {};
+                        }
+                        column.sort.priority = index;
+                    });
+
+                    var i = groupArray.length;
+                    sortArray.sort(function(a, b){ return a.sort.priority - b.sort.priority; });
+                    sortArray.forEach( function(column, index){
+                        column.sort.priority = i;
+                        column.suppressRemoveSort = column.colDef.suppressRemoveSort;
+                        i++;
+                    });
+                },
+
+
+                /**
+                 * @ngdoc function
+                 * @name groupRows
+                 * @methodOf  ui.grid.grouping.service:uiGridGroupingService
+                 * @description The rowProcessor that creates the groupHeaders (i.e. does
+                 * the actual grouping).
+                 *
+                 * Assumes it is always called after the sorting processor, guaranteed by the priority setting
+                 *
+                 * Processes all the rows in order, inserting a groupHeader row whenever there is a change
+                 * in value of a grouped row, based on the sortAlgorithm used for the column.  The group header row
+                 * is looked up in the groupHeaderCache, and used from there if there is one. The entity is reset
+                 * to {} if one is found.
+                 *
+                 * As it processes it maintains a `processingState` array. This records, for each level of grouping we're
+                 * working with, the following information:
+                 * ```
+                 *   {
+                 *     fieldName: name,
+                 *     col: col,
+                 *     initialised: boolean,
+                 *     currentValue: value,
+                 *     currentRow: gridRow,
+                 *   }
+                 * ```
+                 * We look for changes in the currentValue at any of the levels.  Where we find a change we:
+                 *
+                 * - create a new groupHeader row in the array
+                 *
+                 * @param {array} renderableRows the rows we want to process, usually the output from the previous rowProcessor
+                 * @returns {array} the updated rows, including our new group rows
+                 */
+                groupRows: function( renderableRows ) {
+                    if (renderableRows.length === 0){
+                        return renderableRows;
+                    }
+
+                    var grid = this;
+                    grid.grouping.oldGroupingHeaderCache = grid.grouping.groupingHeaderCache || {};
+                    grid.grouping.groupingHeaderCache = {};
+
+                    var processingState = service.initialiseProcessingState( grid );
+
+                    // processes each of the fields we are grouping by, checks if the value has changed and inserts a groupHeader
+                    // Broken out as shouldn't create functions in a loop.
+                    var updateProcessingState = function( groupFieldState, stateIndex ) {
+                        var fieldValue = grid.getCellValue(row, groupFieldState.col);
+
+                        // look for change of value - and insert a header
+                        if ( !groupFieldState.initialised || rowSorter.getSortFn(grid, groupFieldState.col, renderableRows)(fieldValue, groupFieldState.currentValue) !== 0 ){
+                            service.insertGroupHeader( grid, renderableRows, i, processingState, stateIndex );
+                            i++;
+                        }
+                    };
+
+                    // use a for loop because it's tolerant of the array length changing whilst we go - we can
+                    // manipulate the iterator when we insert groupHeader rows
+                    for (var i = 0; i < renderableRows.length; i++ ){
+                        var row = renderableRows[i];
+
+                        if ( row.visible ){
+                            processingState.forEach( updateProcessingState );
+                        }
+                    }
+
+                    delete grid.grouping.oldGroupingHeaderCache;
+                    return renderableRows;
+                },
+
+
+                /**
+                 * @ngdoc function
+                 * @name initialiseProcessingState
+                 * @methodOf  ui.grid.grouping.service:uiGridGroupingService
+                 * @description Creates the processing state array that is used
+                 * for groupRows.
+                 *
+                 * @param {Grid} grid grid object
+                 * @returns {array} an array in the format described in the groupRows method,
+                 * initialised with blank values
+                 */
+                initialiseProcessingState: function( grid ){
+                    var processingState = [];
+                    var columnSettings = service.getGrouping( grid );
+
+                    columnSettings.grouping.forEach( function( groupItem, index){
+                        processingState.push({
+                            fieldName: groupItem.field,
+                            col: groupItem.col,
+                            initialised: false,
+                            currentValue: null,
+                            currentRow: null
+                        });
+                    });
+
+                    return processingState;
+                },
+
+
+                /**
+                 * @ngdoc function
+                 * @name getGrouping
+                 * @methodOf  ui.grid.grouping.service:uiGridGroupingService
+                 * @description Get the grouping settings from the columns.  As a side effect
+                 * this always renumbers the grouping starting at 0
+                 * @param {Grid} grid grid object
+                 * @returns {array} an array of the group fields, in order of priority
+                 */
+                getGrouping: function( grid ){
+                    var groupArray = [];
+                    var aggregateArray = [];
+
+                    // get all the grouping
+                    grid.columns.forEach( function(column, columnIndex){
+                        if ( column.grouping ){
+                            if ( typeof(column.grouping.groupPriority) !== 'undefined' && column.grouping.groupPriority >= 0){
+                                groupArray.push({ field: column.field, col: column, groupPriority: column.grouping.groupPriority, grouping: column.grouping });
+                            }
+                        }
+                        if ( column.treeAggregation && column.treeAggregation.type ){
+                            aggregateArray.push({ field: column.field, col: column, aggregation: column.treeAggregation });
+                        }
+                    });
+
+                    // sort grouping into priority order
+                    groupArray.sort( function(a, b){
+                        return a.groupPriority - b.groupPriority;
+                    });
+
+                    // renumber the priority in case it was somewhat messed up, then remove the grouping reference
+                    groupArray.forEach( function( group, index) {
+                        group.grouping.groupPriority = index;
+                        group.groupPriority = index;
+                        delete group.grouping;
+                    });
+
+                    return { grouping: groupArray, aggregations: aggregateArray };
+                },
+
+
+                /**
+                 * @ngdoc function
+                 * @name insertGroupHeader
+                 * @methodOf  ui.grid.grouping.service:uiGridGroupingService
+                 * @description Create a group header row, and link it to the various configuration
+                 * items that we use.
+                 *
+                 * Look for the row in the oldGroupingHeaderCache, write the row into the new groupingHeaderCache.
+                 *
+                 * @param {Grid} grid grid object
+                 * @param {array} renderableRows the rows that we are processing
+                 * @param {number} rowIndex the row we were up to processing
+                 * @param {array} processingState the current processing state
+                 * @param {number} stateIndex the processing state item that we were on when we triggered a new group header -
+                 * i.e. the column that we want to create a header for
+                 */
+                insertGroupHeader: function( grid, renderableRows, rowIndex, processingState, stateIndex ) {
+                    // set the value that caused the end of a group into the header row and the processing state
+                    var fieldName = processingState[stateIndex].fieldName;
+                    var col = processingState[stateIndex].col;
+
+                    var newValue = grid.getCellValue(renderableRows[rowIndex], col);
+                    var newDisplayValue = newValue;
+                    if ( typeof(newValue) === 'undefined' || newValue === null ) {
+                        newDisplayValue = grid.options.groupingNullLabel;
+                    }
+
+                    var getKeyAsValueForCacheMap = function(key) {
+                        if (angular.isObject(key)) {
+                            return JSON.stringify(key);
+                        } else {
+                            return key;
+                        }
+                    };
+
+                    var cacheItem = grid.grouping.oldGroupingHeaderCache;
+                    for ( var i = 0; i < stateIndex; i++ ){
+                        if ( cacheItem && cacheItem[getKeyAsValueForCacheMap(processingState[i].currentValue)] ){
+                            cacheItem = cacheItem[getKeyAsValueForCacheMap(processingState[i].currentValue)].children;
+                        }
+                    }
+
+                    var headerRow;
+                    if ( cacheItem && cacheItem[getKeyAsValueForCacheMap(newValue)]){
+                        headerRow = cacheItem[getKeyAsValueForCacheMap(newValue)].row;
+                        headerRow.entity = {};
+                    } else {
+                        headerRow = new GridRow( {}, null, grid );
+                        gridClassFactory.rowTemplateAssigner.call(grid, headerRow);
+                    }
+
+                    headerRow.entity['$$' + processingState[stateIndex].col.uid] = { groupVal: newDisplayValue };
+                    headerRow.treeLevel = stateIndex;
+                    headerRow.groupHeader = true;
+                    headerRow.internalRow = true;
+                    headerRow.enableCellEdit = false;
+                    headerRow.enableSelection = grid.options.enableGroupHeaderSelection;
+                    processingState[stateIndex].initialised = true;
+                    processingState[stateIndex].currentValue = newValue;
+                    processingState[stateIndex].currentRow = headerRow;
+
+                    // set all processing states below this one to not be initialised - change of this state
+                    // means all those need to start again
+                    service.finaliseProcessingState( processingState, stateIndex + 1);
+
+                    // insert our new header row
+                    renderableRows.splice(rowIndex, 0, headerRow);
+
+                    // add our new header row to the cache
+                    cacheItem = grid.grouping.groupingHeaderCache;
+                    for ( i = 0; i < stateIndex; i++ ){
+                        cacheItem = cacheItem[getKeyAsValueForCacheMap(processingState[i].currentValue)].children;
+                    }
+                    cacheItem[getKeyAsValueForCacheMap(newValue)] = { row: headerRow, children: {} };
+                },
+
+
+                /**
+                 * @ngdoc function
+                 * @name finaliseProcessingState
+                 * @methodOf  ui.grid.grouping.service:uiGridGroupingService
+                 * @description Set all processing states lower than the one that had a break in value to
+                 * no longer be initialised.  Render the counts into the entity ready for display.
+                 *
+                 * @param {Grid} grid grid object
+                 * @param {array} processingState the current processing state
+                 * @param {number} stateIndex the processing state item that we were on when we triggered a new group header, all
+                 * processing states after this need to be finalised
+                 */
+                finaliseProcessingState: function( processingState, stateIndex ){
+                    for ( var i = stateIndex; i < processingState.length; i++){
+                        processingState[i].initialised = false;
+                        processingState[i].currentRow = null;
+                        processingState[i].currentValue = null;
+                    }
+                },
+
+
+                /**
+                 * @ngdoc function
+                 * @name getRowExpandedStates
+                 * @methodOf  ui.grid.grouping.service:uiGridGroupingService
+                 * @description Extract the groupHeaderCache hash, pulling out only the states.
+                 *
+                 * The example below shows a grid that is grouped by gender then age
+                 *
+                 * <pre>
+                 *   {
+                 *     male: {
+                 *       state: 'expanded',
+                 *       children: {
+                 *         22: { state: 'expanded' },
+                 *         30: { state: 'collapsed' }
+                 *       }
+                 *     },
+                 *     female: {
+                 *       state: 'expanded',
+                 *       children: {
+                 *         28: { state: 'expanded' },
+                 *         55: { state: 'collapsed' }
+                 *       }
+                 *     }
+                 *   }
+                 * </pre>
+                 *
+                 * @param {Grid} grid grid object
+                 * @returns {hash} the expanded states as a hash
+                 */
+                getRowExpandedStates: function(treeChildren){
+                    if ( typeof(treeChildren) === 'undefined' ){
+                        return {};
+                    }
+
+                    var newChildren = {};
+
+                    angular.forEach( treeChildren, function( value, key ){
+                        newChildren[key] = { state: value.row.treeNode.state };
+                        if ( value.children ){
+                            newChildren[key].children = service.getRowExpandedStates( value.children );
+                        } else {
+                            newChildren[key].children = {};
+                        }
+                    });
+
+                    return newChildren;
+                },
+
+
+                /**
+                 * @ngdoc function
+                 * @name applyRowExpandedStates
+                 * @methodOf  ui.grid.grouping.service:uiGridGroupingService
+                 * @description Take a hash in the format as created by getRowExpandedStates,
+                 * and apply it to the grid.grouping.groupHeaderCache.
+                 *
+                 * Takes a treeSubset, and applies to a treeSubset - so can be called
+                 * recursively.
+                 *
+                 * @param {object} currentNode can be grid.grouping.groupHeaderCache, or any of
+                 * the children of that hash
+                 * @returns {hash} expandedStates can be the full expanded states, or children
+                 * of that expanded states (which hopefully matches the subset of the groupHeaderCache)
+                 */
+                applyRowExpandedStates: function( currentNode, expandedStates ){
+                    if ( typeof(expandedStates) === 'undefined' ){
+                        return;
+                    }
+
+                    angular.forEach(expandedStates, function( value, key ) {
+                        if ( currentNode[key] ){
+                            currentNode[key].row.treeNode.state = value.state;
+
+                            if (value.children && currentNode[key].children){
+                                service.applyRowExpandedStates( currentNode[key].children, value.children );
+                            }
+                        }
+                    });
+                }
+
+
+      };
+
+                      return service;
+
+      }]);
+
+
+                      /**
+                       *  @ngdoc directive
+                       *  @name ui.grid.grouping.directive:uiGridGrouping
+                       *  @element div
+                       *  @restrict A
+                       *
+                       *  @description Adds grouping features to grid
+                       *
+                       *  @example
+                       <example module="app">
+                       <file name="app.js">
+                       var app = angular.module('app', ['ui.grid', 'ui.grid.grouping']);
+
+                       app.controller('MainCtrl', ['$scope', function ($scope) {
+                       $scope.data = [
+                       { name: 'Bob', title: 'CEO' },
+                       { name: 'Frank', title: 'Lowly Developer' }
+                       ];
+
+                       $scope.columnDefs = [
+                       {name: 'name', enableCellEdit: true},
+                       {name: 'title', enableCellEdit: true}
+                       ];
+
+                       $scope.gridOptions = { columnDefs: $scope.columnDefs, data: $scope.data };
+                       }]);
+                       </file>
+                       <file name="index.html">
+                       <div ng-controller="MainCtrl">
+                       <div ui-grid="gridOptions" ui-grid-grouping></div>
+                       </div>
+                       </file>
+                       </example>
+                       */
+                      module.directive('uiGridGrouping', ['uiGridGroupingConstants', 'uiGridGroupingService', '$templateCache',
+                              function (uiGridGroupingConstants, uiGridGroupingService, $templateCache) {
+                                  return {
+                                      replace: true,
+                                      priority: 0,
+                                      require: '^uiGrid',
+                                      scope: false,
+                                      compile: function () {
+                                          return {
+                                              pre: function ($scope, $elm, $attrs, uiGridCtrl) {
+                                                  if (uiGridCtrl.grid.options.enableGrouping !== false){
+                                                      uiGridGroupingService.initializeGrid(uiGridCtrl.grid, $scope);
+                                                  }
+                                              },
+                                              post: function ($scope, $elm, $attrs, uiGridCtrl) {
+                                              }
+                                          };
+                                      }
+                                  };
+                              }]);
+
+    })();
