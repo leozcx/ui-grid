@@ -536,8 +536,9 @@
          */
         if ( col.colDef.groupingShowAggregationMenu !== false ){
           angular.forEach(uiGridTreeBaseService.nativeAggregations(), function(aggregationDef, name){
-            if(col.colDef.grouping && col.colDef.grouping.menu && col.colDef.grouping.menu[name] === false)
+            if (col.colDef.grouping && col.colDef.grouping.menu && col.colDef.grouping.menu[name] === false) {
                 return;
+            }
             addAggregationMenu(name);
           });
           angular.forEach(gridOptions.treeCustomAggregations, function(aggregationDef, name){
