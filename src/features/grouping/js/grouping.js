@@ -536,6 +536,8 @@
          */
         if ( col.colDef.groupingShowAggregationMenu !== false ){
           angular.forEach(uiGridTreeBaseService.nativeAggregations(), function(aggregationDef, name){
+            if(col.colDef.grouping && col.colDef.grouping.menu && col.colDef.grouping.menu[name] === false)
+                return;
             addAggregationMenu(name);
           });
           angular.forEach(gridOptions.treeCustomAggregations, function(aggregationDef, name){
@@ -747,7 +749,7 @@
           aggregationDef = uiGridTreeBaseService.nativeAggregations()[aggregationType];
         }
         
-        if(aggregationDef.aggregationFnAsync) {
+        if (aggregationDef.aggregationFnAsync) {
             aggregationDef.aggregationFnAsync(grid, column, aggregationType).then(function(resp) {
                 column.treeAggregation = { type: aggregationType, label:  i18nService.get().aggregation[aggregationDef.label] || aggregationDef.label, data: resp };
                 column.treeAggregationFn = aggregationDef.aggregationFn;
