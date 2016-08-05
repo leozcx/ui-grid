@@ -1,5 +1,5 @@
 /*!
- * ui-grid - v3.2.1-d6cf4e0 - 2016-07-27
+ * ui-grid - v3.2.1-5370207 - 2016-08-05
  * Copyright (c) 2016 ; License: MIT 
  */
 
@@ -19289,6 +19289,9 @@ module.filter('px', function() {
             addAggregationMenu(name);
           });
           angular.forEach(gridOptions.treeCustomAggregations, function(aggregationDef, name){
+            if (col.colDef.grouping && col.colDef.grouping.menu && col.colDef.grouping.menu[name] === false) {
+                return;
+            }
             addAggregationMenu(name, aggregationDef.menuTitle);
           });
 
