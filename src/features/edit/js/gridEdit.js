@@ -591,7 +591,7 @@
             function shouldEdit(col, row) {
               return !row.isSaving &&
                 ( angular.isFunction(col.colDef.cellEditableCondition) ?
-                    col.colDef.cellEditableCondition($scope) :
+                    col.colDef.cellEditableCondition($scope, row) :
                     col.colDef.cellEditableCondition );
             }
 
