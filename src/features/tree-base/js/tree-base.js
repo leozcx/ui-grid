@@ -1086,13 +1086,14 @@
             }
           }
 
+          // add this node to the tree
+          //Leo: up the line, otherwise async aggragation will fail at the first time, because row.treeNode.aggregations is incorrect
+          service.addOrUseNode(grid, row, parents, aggregations);
+          
           // aggregate if this is a leaf node
           if ( ( typeof(row.treeLevel) === 'undefined' || row.treeLevel === null || row.treeLevel < 0 ) && row.visible  ){
             service.aggregate( grid, row, parents );
           }
-
-          // add this node to the tree
-          service.addOrUseNode(grid, row, parents, aggregations);
 
           if ( typeof(row.treeLevel) !== 'undefined' && row.treeLevel !== null && row.treeLevel >= 0 ){
             parents.push(row);
