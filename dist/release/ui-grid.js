@@ -1,5 +1,5 @@
 /*!
- * ui-grid - v3.2.1-5370207 - 2016-08-05
+ * ui-grid - v3.2.1-cbf7058 - 2016-09-28
  * Copyright (c) 2016 ; License: MIT 
  */
 
@@ -16215,7 +16215,7 @@ module.filter('px', function() {
             function shouldEdit(col, row) {
               return !row.isSaving &&
                 ( angular.isFunction(col.colDef.cellEditableCondition) ?
-                    col.colDef.cellEditableCondition($scope) :
+                    col.colDef.cellEditableCondition($scope, row) :
                     col.colDef.cellEditableCondition );
             }
 
@@ -26771,13 +26771,14 @@ module.filter('px', function() {
             }
           }
 
+          // add this node to the tree
+          //Leo: up the line, otherwise async aggragation will fail at the first time, because row.treeNode.aggregations is incorrect
+          service.addOrUseNode(grid, row, parents, aggregations);
+          
           // aggregate if this is a leaf node
           if ( ( typeof(row.treeLevel) === 'undefined' || row.treeLevel === null || row.treeLevel < 0 ) && row.visible  ){
             service.aggregate( grid, row, parents );
           }
-
-          // add this node to the tree
-          service.addOrUseNode(grid, row, parents, aggregations);
 
           if ( typeof(row.treeLevel) !== 'undefined' && row.treeLevel !== null && row.treeLevel >= 0 ){
             parents.push(row);
