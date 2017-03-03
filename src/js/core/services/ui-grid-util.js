@@ -352,13 +352,13 @@ module.service('gridUtil', ['$log', '$window', '$document', '$http', '$templateC
 
       // See if the template is itself a promise
       if (angular.isFunction(template.then)) {
-        return template.then(s.postProcessTemplate);
+        return template.then(s.postProcessTemplate).catch(angular.noop);
       }
 
       // If the template is an element, return the element
       try {
         if (angular.element(template).length > 0) {
-          return $q.when(template).then(s.postProcessTemplate);
+          return $q.when(template).then(s.postProcessTemplate).catch(angular.noop);
         }
       }
       catch (err){
@@ -380,7 +380,7 @@ module.service('gridUtil', ['$log', '$window', '$document', '$http', '$templateC
             throw new Error("Could not get template " + template + ": " + err);
           }
         )
-        .then(s.postProcessTemplate);
+        .then(s.postProcessTemplate).catch(angular.noop);
     },
 
     //
@@ -910,7 +910,7 @@ module.service('gridUtil', ['$log', '$window', '$document', '$http', '$templateC
         e = elem[0];
       }
 
-      if (e) {
+      if (e && e !== null) {
         var styles = getStyles(e);
         return e.offsetWidth === 0 && rdisplayswap.test(styles.display) ?
                   s.swap(e, cssShow, function() {
@@ -1278,6 +1278,11 @@ module.service('gridUtil', ['$log', '$window', '$document', '$http', '$templateC
     for ( var i = mouseWheeltoBind.length; i; ) {
       $elm.on(mouseWheeltoBind[--i], cbs[fn]);
     }
+    $elm.on('$destroy', function unbindEvents() {
+      for ( var i = mouseWheeltoBind.length; i; ) {
+        $elm.off(mouseWheeltoBind[--i], cbs[fn]);
+      }
+    });
   };
   s.off.mousewheel = function (elm, fn) {
     var $elm = angular.element(elm);

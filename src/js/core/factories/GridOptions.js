@@ -224,10 +224,17 @@ angular.module('ui.grid')
        * @ngdoc property
        * @name rowHeight
        * @propertyOf ui.grid.class:GridOptions
-       * @description The height of the row in pixels, defaults to 30
+       * @description The height of the row in pixels,  Can be passed as integer or string. defaults to 30.
        *
        */
-      baseOptions.rowHeight = baseOptions.rowHeight || 30;
+
+      if (typeof baseOptions.rowHeight === "string") {
+        baseOptions.rowHeight = parseInt(baseOptions.rowHeight) || 30;
+      }
+
+      else {
+        baseOptions.rowHeight = baseOptions.rowHeight || 30;
+      }
 
       /**
        * @ngdoc integer
@@ -356,7 +363,8 @@ angular.module('ui.grid')
        * @propertyOf ui.grid.class:GridOptions
        * @description True by default. When enabled, this setting adds sort
        * widgets to the column headers, allowing sorting of the data for the entire grid.
-       * Sorting can then be disabled on individual columns using the columnDefs.
+       * Sorting can then be disabled / enabled on individual columns using the columnDefs,
+       * if it set, it will override GridOptions enableSorting setting.
        */
       baseOptions.enableSorting = baseOptions.enableSorting !== false;
 
@@ -485,6 +493,15 @@ angular.module('ui.grid')
        * </br>Refer to the custom row template tutorial for more information.
        */
       baseOptions.rowTemplate = baseOptions.rowTemplate || 'ui-grid/ui-grid-row';
+
+      /**
+      * @ngdoc string
+      * @name gridMenuTemplate
+      * @propertyOf ui.grid.class:GridOptions
+      * @description 'ui-grid/uiGridMenu' by default. When provided, this setting uses a
+      * custom grid menu template.
+      */
+      baseOptions.gridMenuTemplate = baseOptions.gridMenuTemplate || 'ui-grid/uiGridMenu';
 
       /**
        * @ngdoc object
